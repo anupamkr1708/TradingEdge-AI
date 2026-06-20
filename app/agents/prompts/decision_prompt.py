@@ -54,27 +54,3 @@ Consider:
 
 Be conservative. Only recommend BUY/SELL with clear edge.
 """
-
-
-DECISION_PROMPT_DEEPSEEK = """Trading decision for {symbol} - {signal_type}
-
-TECHNICAL: {tech_confidence}% | Trend: {tech_trend} | RSI: {rsi_signal} | MACD: {macd_trend} | Volume: {volume_signal}
-"{tech_reasoning}"
-
-NEWS: {news_confidence}% | Sentiment: {news_sentiment} | Impact: {news_impact}
-"{news_reasoning}"
-
-Decide: BUY/SELL/HOLD/SKIP
-
-JSON response:
-{{
-  "recommendation": "BUY/SELL/HOLD/SKIP",
-  "confidence": 0-100,
-  "reasoning": "synthesis (3 sentences)",
-  "risk_level": "low/medium/high",
-  "key_factors": ["list"],
-  "conflicts": "any concerns"
-}}
-
-Weights: Technical 60%, News 40%. Min confidence 55% for trades. Be conservative.
-"""

@@ -37,26 +37,6 @@ Be objective and concise. Confidence reflects certainty of sentiment and impact 
 """
 
 
-NEWS_ANALYSIS_PROMPT_DEEPSEEK = """You are a financial news analyst. Analyze sentiment for {symbol}.
-
-NEWS:
-{headlines}
-
-Respond with JSON:
-{{
-  "sentiment": "positive/neutral/negative",
-  "impact": "high/medium/low",
-  "relevance": "relevant/partially_relevant/irrelevant",
-  "key_signals": ["list"],
-  "risks": ["list"],
-  "reasoning": "brief analysis",
-  "confidence": 0-100
-}}
-
-Focus on financial impact. Be concise.
-"""
-
-
 def format_headlines(news_items: list[dict]) -> str:
     """Format news headlines for prompt"""
     if not news_items:

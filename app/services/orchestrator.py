@@ -80,20 +80,21 @@ class Orchestrator:
             # Step 1: Signal Enrichment
             enrichment = await self._run_enrichment(candles)
             
-            # Step 2: Technical Agent
-            technical_result = await self._run_technical_agent(
-                symbol=symbol,
-                signal_type=signal_type,
-                signal_data=signal_data,
-                enrichment=enrichment
-            )
-            
-            # Step 3: News Agent (non-blocking failure)
-            news_result = await self._run_news_agent(
-                symbol=symbol,
-                signal_type=signal_type,
-                signal_data=signal_data,
-                news_items=news_items
+            # Step 2 & 3: Technical and News Agents (parallel execution)
+            import asyncio
+            technical_result, news_result = await asyncio.gather(
+                self._run_technical_agent(
+                    symbol=symbol,
+                    signal_type=signal_type,
+                    signal_data=signal_data,
+                    enrichment=enrichment
+                ),
+                self._run_news_agent(
+                    symbol=symbol,
+                    signal_type=signal_type,
+                    signal_data=signal_data,
+                    news_items=news_items
+                )
             )
             
             # Step 4: Decision Agent
@@ -180,7 +181,10 @@ class Orchestrator:
             }
         
         try:
-            return self.enrichment_service.enrich(candles)
+            # Run in executor to avoid blocking event loop with pandas/numpy
+            import asyncio
+            loop = asyncio.get_event_loop()
+            return await loop.run_in_executor(None, self.enrichment_service.enrich, candles)
         except Exception as e:
             self.logger.error(f"Enrichment failed: {e}")
             return {

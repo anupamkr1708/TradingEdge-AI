@@ -24,6 +24,10 @@ class JSONFormatter(logging.Formatter):
             "message": record.getMessage(),
         }
         
+        # Add request_id if present
+        if hasattr(record, "request_id"):
+            log_data["request_id"] = record.request_id
+        
         if record.exc_info:
             log_data["exception"] = self.formatException(record.exc_info)
         
@@ -51,8 +55,13 @@ class DevelopmentFormatter(logging.Formatter):
             f"{datetime.utcnow().strftime('%Y-%m-%d %H:%M:%S')} | "
             f"{color}{record.levelname:8}{reset} | "
             f"{record.name:30} | "
-            f"{record.getMessage()}"
         )
+        
+        # Add request_id if present
+        if hasattr(record, "request_id"):
+            formatted += f"[{record.request_id[:8]}] "
+        
+        formatted += record.getMessage()
         
         if record.exc_info:
             formatted += f"\n{self.formatException(record.exc_info)}"

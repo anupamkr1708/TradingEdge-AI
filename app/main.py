@@ -7,15 +7,22 @@ Main application entry point with lifecycle management.
 from contextlib import asynccontextmanager
 from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import JSONResponse
+from fastapi.exceptions import RequestValidationError
 from prometheus_client import generate_latest, CONTENT_TYPE_LATEST
 from starlette.responses import Response
 import time
 
 from app.core.config import settings
 from app.core.logging import setup_logging, get_logger
+from app.core.errors import (
+    AppException,
+    app_exception_handler,
+    validation_exception_handler,
+    global_exception_handler
+)
 from app.db.supabase import init_db, close_db
 from app.integrations.redis_client import init_redis, close_redis
+from app.middleware import RateLimiter, CorrelationMiddleware, SecurityHeadersMiddleware
 from app.routers import health
 from app.monitoring.metrics import metrics
 
@@ -33,6 +40,11 @@ async def lifespan(app: FastAPI):
     logger.info(f"Environment: {settings.ENVIRONMENT}")
     
     try:
+        # Validate Groq API key
+        if not settings.GROQ_API_KEY or settings.GROQ_API_KEY == "your_groq_api_key_here":
+            raise ValueError("GROQ_API_KEY not configured in environment")
+        logger.info("Groq API key validated")
+        
         # Initialize database
         init_db()
         
@@ -42,6 +54,10 @@ async def lifespan(app: FastAPI):
         logger.info("Application startup complete")
         
         yield
+        
+    except Exception as e:
+        logger.error(f"Application startup failed: {e}", exc_info=True)
+        raise
         
     finally:
         # Shutdown
@@ -59,8 +75,19 @@ app = FastAPI(
     lifespan=lifespan,
 )
 
+# Exception handlers
+app.add_exception_handler(RequestValidationError, validation_exception_handler)
+app.add_exception_handler(AppException, app_exception_handler)
+app.add_exception_handler(Exception, global_exception_handler)
 
-# CORS middleware
+# Middleware (order matters: first added = outermost)
+# 1. Security headers (outermost)
+app.add_middleware(
+    SecurityHeadersMiddleware,
+    enable_hsts=(settings.ENVIRONMENT == "production")
+)
+
+# 2. CORS
 app.add_middleware(
     CORSMiddleware,
     allow_origins=settings.CORS_ORIGINS,
@@ -68,6 +95,13 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
+
+# 3. Correlation ID tracking
+app.add_middleware(CorrelationMiddleware)
+
+# 4. Rate limiting
+app.add_middleware(RateLimiter)
+
 
 
 # Request timing middleware
@@ -91,22 +125,15 @@ async def add_metrics_middleware(request: Request, call_next):
         latency_seconds=latency
     )
     
+    # Log slow requests
+    request_id = getattr(request.state, "request_id", None)
+    if latency > 1.0:
+        logger.warning(
+            f"Slow request: {request.method} {request.url.path} took {latency:.2f}s",
+            extra={"request_id": request_id, "latency": latency}
+        )
+    
     return response
-
-
-# Exception handlers
-@app.exception_handler(Exception)
-async def global_exception_handler(request: Request, exc: Exception):
-    """Global exception handler"""
-    logger.error(
-        f"Unhandled exception: {exc}",
-        exc_info=True,
-        extra={"context": {"path": request.url.path, "method": request.method}}
-    )
-    return JSONResponse(
-        status_code=500,
-        content={"error": "Internal server error", "detail": str(exc)}
-    )
 
 
 # Include routers

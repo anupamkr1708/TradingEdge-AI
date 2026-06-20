@@ -95,7 +95,7 @@ class BaseAgent(ABC):
                 metadata=metadata,
                 latency_ms=latency_ms,
                 tokens_used=tokens_used,
-                model_used=model_used,
+                llm_model=model_used,
                 error=None
             )
             
@@ -124,7 +124,7 @@ class BaseAgent(ABC):
                 metadata={},
                 latency_ms=latency_ms,
                 tokens_used=None,
-                model_used=None,
+                llm_model=None,
                 error=error_msg
             )
     

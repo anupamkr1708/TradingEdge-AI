@@ -62,6 +62,12 @@ def receive_connect(dbapi_conn, connection_record):
     logger.debug("Database connection established")
 
 
+@event.listens_for(async_engine.sync_engine.pool, "connect")
+def clear_prepared_statements(dbapi_conn, connection_record):
+    """Deallocate prepared statements for PgBouncer transaction pooling compatibility"""
+    dbapi_conn.run_async(lambda conn: conn.execute("DEALLOCATE ALL;"))
+
+
 async def get_async_db() -> AsyncGenerator[AsyncSession, None]:
     """
     FastAPI async dependency for database sessions.
@@ -135,6 +141,16 @@ def init_db() -> None:
     healthy, message = check_database_health()
     if not healthy:
         raise RuntimeError(f"Database initialization failed: {message}")
+    
+    # Create tables if they don't exist (development/production safe)
+    try:
+        from app.db.models import Base
+        logger.info("Creating database tables if not exist")
+        Base.metadata.create_all(bind=engine, checkfirst=True)
+        logger.info("Database tables initialized")
+    except Exception as e:
+        logger.error(f"Failed to create tables: {e}")
+        raise RuntimeError(f"Table creation failed: {e}")
     
     logger.info("Database initialized successfully")
 

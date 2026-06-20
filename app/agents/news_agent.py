@@ -8,11 +8,7 @@ import json
 from typing import Any
 
 from app.agents.base import BaseAgent
-from app.agents.prompts.news_prompt import (
-    NEWS_ANALYSIS_PROMPT,
-    NEWS_ANALYSIS_PROMPT_DEEPSEEK,
-    format_headlines
-)
+from app.agents.prompts.news_prompt import NEWS_ANALYSIS_PROMPT, format_headlines
 from app.core.schemas import AgentRequest
 from app.integrations.groq_client import GroqClient
 from app.core.logging import get_logger
@@ -57,36 +53,12 @@ class NewsAgent(BaseAgent):
         # Format headlines
         headlines = format_headlines(news_items)
         
-        # Try DeepSeek R1 first (better reasoning)
+        # Use Llama 3.3
         try:
-            return await self._analyze_with_deepseek(request.symbol, headlines)
+            return await self._analyze_with_llama(request.symbol, headlines)
         except Exception as e:
-            self.logger.warning(f"DeepSeek failed: {e}, trying Llama")
-            
-            # Fallback to Llama 3.3
-            try:
-                return await self._analyze_with_llama(request.symbol, headlines)
-            except Exception as e2:
-                self.logger.error(f"Llama failed: {e2}, using deterministic fallback")
-                return self._deterministic_analysis(request.symbol, news_items)
-    
-    async def _analyze_with_deepseek(self, symbol: str, headlines: str) -> dict[str, Any]:
-        """Analyze with DeepSeek R1 model"""
-        prompt = NEWS_ANALYSIS_PROMPT_DEEPSEEK.format(
-            symbol=symbol,
-            headlines=headlines
-        )
-        
-        llm_response = await self.llm.generate(
-            prompt=prompt,
-            model="deepseek-r1-distill-llama-70b",
-            temperature=0.2,
-            max_tokens=400,
-            timeout=20
-        )
-        
-        analysis = self._parse_llm_response(llm_response["content"])
-        return self._build_result(analysis, llm_response)
+            self.logger.error(f"LLM analysis failed: {e}, using deterministic fallback")
+            return self._deterministic_analysis(request.symbol, news_items)
     
     async def _analyze_with_llama(self, symbol: str, headlines: str) -> dict[str, Any]:
         """Analyze with Llama 3.3 model"""

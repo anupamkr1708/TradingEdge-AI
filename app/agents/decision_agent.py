@@ -8,7 +8,7 @@ import json
 from typing import Any
 
 from app.agents.base import BaseAgent
-from app.agents.prompts.decision_prompt import DECISION_PROMPT, DECISION_PROMPT_DEEPSEEK
+from app.agents.prompts.decision_prompt import DECISION_PROMPT
 from app.core.schemas import AgentRequest, AgentResponse
 from app.integrations.groq_client import GroqClient
 from app.core.logging import get_logger
@@ -85,24 +85,18 @@ class DecisionAgent(BaseAgent):
             enrichment=enrichment
         )
         
-        # Try DeepSeek R1 first
+        # Use Llama 3.3
         try:
-            return await self._analyze_with_deepseek(prompt_context)
+            return await self._analyze_with_llama(prompt_context)
         except Exception as e:
-            self.logger.warning(f"DeepSeek failed: {e}, trying Llama")
-            
-            # Fallback to Llama 3.3
-            try:
-                return await self._analyze_with_llama(prompt_context)
-            except Exception as e2:
-                self.logger.error(f"Llama failed: {e2}, using deterministic fallback")
-                return self._deterministic_decision(
-                    tech_confidence=tech_confidence,
-                    tech_metadata=tech_metadata,
-                    news_confidence=news_confidence,
-                    news_metadata=news_metadata,
-                    signal_type=request.signal_type
-                )
+            self.logger.error(f"LLM analysis failed: {e}, using deterministic fallback")
+            return self._deterministic_decision(
+                tech_confidence=tech_confidence,
+                tech_metadata=tech_metadata,
+                news_confidence=news_confidence,
+                news_metadata=news_metadata,
+                signal_type=request.signal_type
+            )
     
     def _build_prompt_context(
         self,
@@ -135,21 +129,6 @@ class DecisionAgent(BaseAgent):
             "macd_trend": enrichment.get("macd_trend", "neutral"),
             "volume_signal": enrichment.get("volume_signal", "normal"),
         }
-    
-    async def _analyze_with_deepseek(self, context: dict) -> dict[str, Any]:
-        """Analyze with DeepSeek R1 model"""
-        prompt = DECISION_PROMPT_DEEPSEEK.format(**context)
-        
-        llm_response = await self.llm.generate(
-            prompt=prompt,
-            model="deepseek-r1-distill-llama-70b",
-            temperature=0.2,
-            max_tokens=500,
-            timeout=20
-        )
-        
-        decision = self._parse_llm_response(llm_response["content"])
-        return self._build_result(decision, llm_response)
     
     async def _analyze_with_llama(self, context: dict) -> dict[str, Any]:
         """Analyze with Llama 3.3 model"""

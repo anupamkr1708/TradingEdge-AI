@@ -5,8 +5,8 @@ SQLAlchemy models for TradeMind AI.
 """
 
 import uuid
-from datetime import datetime
-from sqlalchemy import String, Integer, Float, Text, DateTime, JSON, Index
+from datetime import datetime, timezone
+from sqlalchemy import String, Integer, Float, Text, DateTime, JSON, Index, ForeignKey
 from sqlalchemy.dialects.postgresql import UUID
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column
 
@@ -14,6 +14,11 @@ from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column
 class Base(DeclarativeBase):
     """Base class for all models"""
     pass
+
+
+def utcnow():
+    """Return timezone-aware UTC timestamp"""
+    return datetime.now(timezone.utc)
 
 
 class Recommendation(Base):
@@ -31,8 +36,8 @@ class Recommendation(Base):
     target_price: Mapped[float | None] = mapped_column(Float)
     stop_loss: Mapped[float | None] = mapped_column(Float)
     metadata_json: Mapped[dict] = mapped_column(JSON, nullable=False, default=dict)
-    created_at: Mapped[datetime] = mapped_column(DateTime, nullable=False, default=datetime.utcnow, index=True)
-    updated_at: Mapped[datetime] = mapped_column(DateTime, nullable=False, default=datetime.utcnow, onupdate=datetime.utcnow)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, default=utcnow, index=True)
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, default=utcnow, onupdate=utcnow)
     
     __table_args__ = (
         Index('idx_rec_symbol_created', 'symbol', 'created_at'),
@@ -46,15 +51,20 @@ class AgentOutput(Base):
     __tablename__ = "agent_outputs"
     
     id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
-    recommendation_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), nullable=False, index=True)
+    recommendation_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), 
+        ForeignKey("recommendations.id", ondelete="CASCADE"),
+        nullable=False, 
+        index=True
+    )
     agent_name: Mapped[str] = mapped_column(String(50), nullable=False, index=True)
     reasoning: Mapped[str] = mapped_column(Text, nullable=False)
     confidence: Mapped[int] = mapped_column(Integer, nullable=False)
     metadata_json: Mapped[dict] = mapped_column(JSON, nullable=False, default=dict)
     latency_ms: Mapped[int] = mapped_column(Integer, nullable=False)
     tokens_used: Mapped[int | None] = mapped_column(Integer)
-    model_used: Mapped[str | None] = mapped_column(String(50))
-    created_at: Mapped[datetime] = mapped_column(DateTime, nullable=False, default=datetime.utcnow)
+    llm_model: Mapped[str | None] = mapped_column(String(50))
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, default=utcnow)
     
     __table_args__ = (
         Index('idx_agent_rec_id', 'recommendation_id'),
@@ -72,8 +82,8 @@ class MarketNews(Base):
     source: Mapped[str] = mapped_column(String(100), nullable=False)
     sentiment_score: Mapped[float | None] = mapped_column(Float)
     url: Mapped[str | None] = mapped_column(Text)
-    published_at: Mapped[datetime] = mapped_column(DateTime, nullable=False)
-    created_at: Mapped[datetime] = mapped_column(DateTime, nullable=False, default=datetime.utcnow, index=True)
+    published_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, default=utcnow, index=True)
     
     __table_args__ = (
         Index('idx_news_symbol_published', 'symbol', 'published_at'),
@@ -86,10 +96,16 @@ class EvaluationResult(Base):
     __tablename__ = "evaluation_results"
     
     id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
-    recommendation_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), nullable=False, unique=True, index=True)
+    recommendation_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), 
+        ForeignKey("recommendations.id", ondelete="CASCADE"),
+        nullable=False, 
+        unique=True, 
+        index=True
+    )
     outcome: Mapped[str] = mapped_column(String(20), nullable=False)  # WIN, LOSS, NEUTRAL
     pnl_percent: Mapped[float | None] = mapped_column(Float)
     max_favorable_move: Mapped[float | None] = mapped_column(Float)
     max_adverse_move: Mapped[float | None] = mapped_column(Float)
-    evaluated_at: Mapped[datetime] = mapped_column(DateTime, nullable=False, default=datetime.utcnow)
-    created_at: Mapped[datetime] = mapped_column(DateTime, nullable=False, default=datetime.utcnow)
+    evaluated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, default=utcnow)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, default=utcnow)

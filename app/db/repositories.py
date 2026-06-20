@@ -47,14 +47,6 @@ class RecommendationRepository:
         query = query.limit(limit)
         result = await self.session.execute(query)
         return result.scalars().all()
-    
-    async def commit(self):
-        """Commit transaction"""
-        await self.session.commit()
-    
-    async def rollback(self):
-        """Rollback transaction"""
-        await self.session.rollback()
 
 
 class AgentOutputRepository:
@@ -72,7 +64,7 @@ class AgentOutputRepository:
         metadata_json: dict,
         latency_ms: int,
         tokens_used: int | None = None,
-        model_used: str | None = None
+        llm_model: str | None = None
     ) -> AgentOutput:
         """Create agent output"""
         output = AgentOutput(
@@ -83,7 +75,7 @@ class AgentOutputRepository:
             metadata_json=metadata_json,
             latency_ms=latency_ms,
             tokens_used=tokens_used,
-            model_used=model_used
+            llm_model=llm_model
         )
         self.session.add(output)
         await self.session.flush()

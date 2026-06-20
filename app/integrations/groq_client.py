@@ -1,7 +1,7 @@
 """
 Groq LLM Client
 
-Client for Groq API with DeepSeek R1 and Llama 3.3 support.
+Client for Groq API with Llama 3.3 support.
 """
 
 import hashlib
@@ -18,7 +18,7 @@ from app.monitoring.metrics import metrics
 logger = get_logger(__name__)
 
 
-ModelType = Literal["deepseek-r1-distill-llama-70b", "llama-3.3-70b-versatile"]
+ModelType = Literal["llama-3.3-70b-versatile", "llama-3.1-8b-instant"]
 
 
 class GroqClient:
@@ -26,9 +26,13 @@ class GroqClient:
     
     # Model pricing per 1M tokens (input/output in USD)
     PRICING = {
-        "deepseek-r1-distill-llama-70b": {"input": 0.27, "output": 1.10},
         "llama-3.3-70b-versatile": {"input": 0.59, "output": 0.79},
+        "llama-3.1-8b-instant": {"input": 0.05, "output": 0.08},
     }
+    
+    # Primary and fallback models
+    PRIMARY_MODEL = "llama-3.3-70b-versatile"
+    FALLBACK_MODEL = "llama-3.1-8b-instant"
     
     def __init__(self):
         if not hasattr(settings, 'GROQ_API_KEY'):
@@ -129,39 +133,76 @@ class GroqClient:
     ) -> dict:
         """Call Groq API with exponential backoff retry"""
         
-        for attempt in range(max_retries + 1):
-            try:
-                response = self.client.chat.completions.create(
-                    model=model,
-                    messages=[{"role": "user", "content": prompt}],
-                    temperature=temperature,
-                    max_tokens=max_tokens,
-                    timeout=timeout
-                )
+        # Run sync Groq client in executor to avoid blocking event loop
+        import asyncio
+        loop = asyncio.get_event_loop()
+        return await loop.run_in_executor(
+            None, 
+            self._call_with_retry_sync,
+            prompt,
+            model,
+            temperature,
+            max_tokens,
+            timeout,
+            max_retries
+        )
+    
+    def _call_with_retry_sync(
+        self,
+        prompt: str,
+        model: str,
+        temperature: float,
+        max_tokens: int,
+        timeout: int,
+        max_retries: int = 2
+    ) -> dict:
+        """Synchronous Groq API call with retry and fallback logic"""
+        
+        models_to_try = [model]
+        # Add fallback model if primary model fails with rate limit
+        if model == self.PRIMARY_MODEL and self.FALLBACK_MODEL not in models_to_try:
+            models_to_try.append(self.FALLBACK_MODEL)
+        
+        for model_attempt in models_to_try:
+            for attempt in range(max_retries + 1):
+                try:
+                    response = self.client.chat.completions.create(
+                        model=model_attempt,
+                        messages=[{"role": "user", "content": prompt}],
+                        temperature=temperature,
+                        max_tokens=max_tokens,
+                        timeout=timeout
+                    )
+                    
+                    if model_attempt != model:
+                        logger.info(f"Used fallback model: {model_attempt}")
+                    
+                    return {
+                        "content": response.choices[0].message.content,
+                        "tokens_input": response.usage.prompt_tokens,
+                        "tokens_output": response.usage.completion_tokens,
+                        "tokens_total": response.usage.total_tokens
+                    }
+                    
+                except RateLimitError as e:
+                    if attempt < max_retries:
+                        wait_time = 2 ** attempt
+                        logger.warning(f"Rate limit on {model_attempt}, retry {attempt+1}/{max_retries} in {wait_time}s")
+                        time.sleep(wait_time)
+                    elif model_attempt != models_to_try[-1]:
+                        logger.warning(f"Rate limit exhausted on {model_attempt}, trying fallback")
+                        break
+                    else:
+                        logger.error("Rate limit exceeded on all models")
+                        raise
                 
-                return {
-                    "content": response.choices[0].message.content,
-                    "tokens_input": response.usage.prompt_tokens,
-                    "tokens_output": response.usage.completion_tokens,
-                    "tokens_total": response.usage.total_tokens
-                }
-                
-            except RateLimitError as e:
-                if attempt < max_retries:
-                    wait_time = 2 ** attempt  # Exponential backoff
-                    logger.warning(f"Rate limit hit, retrying in {wait_time}s...")
-                    time.sleep(wait_time)
-                else:
-                    logger.error("Rate limit exceeded after retries")
-                    raise
-            
-            except APIError as e:
-                if e.status_code >= 500 and attempt < max_retries:
-                    wait_time = 1
-                    logger.warning(f"API error {e.status_code}, retrying...")
-                    time.sleep(wait_time)
-                else:
-                    raise
+                except APIError as e:
+                    if e.status_code >= 500 and attempt < max_retries:
+                        wait_time = 1
+                        logger.warning(f"API error {e.status_code} on {model_attempt}, retrying...")
+                        time.sleep(wait_time)
+                    else:
+                        raise
     
     def _calculate_cost(self, model: str, tokens_input: int, tokens_output: int) -> float:
         """Calculate cost in USD"""

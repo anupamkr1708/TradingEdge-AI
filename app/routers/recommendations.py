@@ -26,11 +26,21 @@ logger = get_logger(__name__)
 
 router = APIRouter(prefix="/recommendations", tags=["recommendations"])
 
+# Application-scoped instances (created once, reused across requests)
+_groq_client: GroqClient | None = None
+_orchestrator: Orchestrator | None = None
+
 
 def get_orchestrator() -> Orchestrator:
-    """Dependency: Create orchestrator instance"""
-    groq_client = GroqClient()
-    return Orchestrator(groq_client=groq_client)
+    """Dependency: Get or create orchestrator instance (singleton pattern)"""
+    global _groq_client, _orchestrator
+    
+    if _orchestrator is None:
+        if _groq_client is None:
+            _groq_client = GroqClient()
+        _orchestrator = Orchestrator(groq_client=_groq_client)
+    
+    return _orchestrator
 
 
 @router.post("", response_model=RecommendationDetailResponse, status_code=201)
@@ -102,11 +112,11 @@ async def create_recommendation(
                     metadata_json=agent_result.metadata,
                     latency_ms=agent_result.latency_ms,
                     tokens_used=agent_result.tokens_used,
-                    model_used=agent_result.model_used
+                    llm_model=agent_result.llm_model
                 )
                 agent_outputs.append(output)
         
-        await rec_repo.commit()
+        # Transaction committed by get_async_db dependency
         
         logger.info(f"Recommendation created: {recommendation.id}")
         metrics.record_api_request("POST", "/recommendations", 201)
